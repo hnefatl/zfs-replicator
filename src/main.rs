@@ -1,11 +1,21 @@
+mod args;
+
+use args::*;
 mod typed_command;
 use typed_command::*;
-mod zfs_snapshots;
-use zfs_snapshots::*;
+mod zfs_types;
+use zfs_types::*;
 
-fn make_zfs_list_snapshot_command() -> TypedCommand<ZfsListOutput> {
+fn make_zfs_list_snapshot_command(
+    parent_dataset: Option<&DatasetName>,
+) -> TypedCommand<ZfsListOutput> {
     let mut c = TypedCommand::new("zfs");
     c.args(["list", "-t", "snapshot", "--json", "--json-int"]);
+
+    if let Some(parent_dataset) = parent_dataset {
+        // Recursive from the parent dataset down.
+        c.args(["-r", parent_dataset]);
+    }
     c
 }
 fn make_run_via_ssh_command<T: serde::de::DeserializeOwned>(
@@ -20,13 +30,19 @@ fn make_run_via_ssh_command<T: serde::de::DeserializeOwned>(
 }
 
 fn main() {
-    let local_snapshots = make_zfs_list_snapshot_command()
+    // Make sure command line args are parsed first.
+    std::sync::LazyLock::force(&ARGS);
+
+    let local_snapshots = make_zfs_list_snapshot_command(Some(&ARGS.source_dataset))
         .run_and_parse_stdout()
         .expect("failed to fetch snapshots from local");
 
-    let remote_snapshots = make_run_via_ssh_command("warthog", make_zfs_list_snapshot_command())
-        .run_and_parse_stdout()
-        .expect("failed to fetch snapshots from remote");
+    let remote_snapshots = make_run_via_ssh_command(
+        &ARGS.remote,
+        make_zfs_list_snapshot_command(Some(&ARGS.remote_dataset)),
+    )
+    .run_and_parse_stdout()
+    .expect("failed to fetch snapshots from remote");
 
     println!("{:?}", local_snapshots);
     println!("{:?}", remote_snapshots);

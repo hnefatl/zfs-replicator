@@ -1,4 +1,10 @@
-use std::{marker::PhantomData, ops::{Deref, DerefMut}, process::Command};
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    process::Command,
+};
+
+use crate::args;
 
 /// A `std::process::Command` along with a type hint about what data should be output.
 pub struct TypedCommand<T> {
@@ -14,6 +20,10 @@ impl<T: serde::de::DeserializeOwned> TypedCommand<T> {
     }
 
     pub fn run_and_parse_stdout(mut self) -> anyhow::Result<T> {
+        if args::ARGS.verbose {
+            println!("Running command: {:?}", self.command)
+        }
+
         let output = self.command.output()?;
         if !output.status.success() {
             anyhow::bail!(
