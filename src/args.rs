@@ -22,4 +22,7 @@ pub struct Args {
     /// Print verbose tracelogs.
     #[arg(short, long, default_value_t = false)]
     pub verbose: bool,
+    /// Dry-run ZFS mutating commands.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
 }
