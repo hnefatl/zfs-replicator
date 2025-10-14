@@ -35,7 +35,8 @@ impl Ord for Snapshot {
 // By only implementing the snapshot value we reject anything that's not a snapshot.
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DatasetType {
-    SNAPSHOT,
+    #[serde(rename = "SNAPSHOT")]
+    Snapshot,
 }
 
 #[derive(Deserialize, Debug, Clone)]

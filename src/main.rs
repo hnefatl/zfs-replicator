@@ -1,5 +1,13 @@
+#![deny(
+    clippy::panic,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing
+)]
+
 mod args;
 
+use anyhow::Context;
 use args::*;
 mod typed_command;
 use typed_command::*;
@@ -29,21 +37,22 @@ fn make_run_via_ssh_command<T: serde::de::DeserializeOwned>(
     c
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     // Make sure command line args are parsed first.
     std::sync::LazyLock::force(&ARGS);
 
     let local_snapshots = make_zfs_list_snapshot_command(Some(&ARGS.source_dataset))
         .run_and_parse_stdout()
-        .expect("failed to fetch snapshots from local");
+        .context("failed to fetch snapshots from local")?;
 
     let remote_snapshots = make_run_via_ssh_command(
         &ARGS.remote,
         make_zfs_list_snapshot_command(Some(&ARGS.remote_dataset)),
     )
     .run_and_parse_stdout()
-    .expect("failed to fetch snapshots from remote");
+    .context("failed to fetch snapshots from remote")?;
 
     println!("{:?}", local_snapshots);
     println!("{:?}", remote_snapshots);
+    Ok(())
 }

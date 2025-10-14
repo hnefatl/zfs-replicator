@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use crate::zfs_types::*;
 
 // Global variable for easier access throughout the CLI.
-pub static ARGS: LazyLock<Args> = LazyLock::new(|| Args::parse());
+pub static ARGS: LazyLock<Args> = LazyLock::new(Args::parse);
 
 #[derive(Parser, Debug)]
 #[command(rename_all = "snake_case")]
