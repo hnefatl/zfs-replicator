@@ -4,9 +4,7 @@ use crate::args::ARGS;
 use crate::typed_command::*;
 use crate::zfs_types::*;
 
-pub fn make_zfs_list_snapshots_command(
-    parent_dataset: Option<&DatasetName>,
-) -> TypedCommand<ZfsListSnapshotOutput, true> {
+pub fn make_zfs_list_snapshots_command(parent_dataset: Option<&DatasetName>) -> TypedCommand<ZfsListSnapshotOutput> {
     let mut c = TypedCommand::new("zfs");
     c.args(["list", "-t", "snapshot", "--json", "--json-int"]);
 
@@ -16,20 +14,17 @@ pub fn make_zfs_list_snapshots_command(
     }
     c
 }
-pub fn make_zfs_list_datasets_command() -> TypedCommand<ZfsListDatasetOutput, true> {
+pub fn make_zfs_list_datasets_command() -> TypedCommand<ZfsListDatasetOutput> {
     let mut c = TypedCommand::new("zfs");
     c.args(["list", "-t", "filesystem", "--json"]);
     c
 }
-pub fn make_zfs_create_dataset_command(dataset: &DatasetName) -> TypedCommand<(), false> {
+pub fn make_zfs_create_dataset_command(dataset: &DatasetName) -> TypedCommand<()> {
     let mut c = TypedCommand::new("zfs");
     c.args(["create", dataset]);
     c
 }
-pub fn make_zfs_incremental_send_command(
-    from: &SnapshotFullName,
-    to: &SnapshotFullName,
-) -> TypedCommand<Vec<u8>, true> {
+pub fn make_zfs_incremental_send_command(from: &SnapshotFullName, to: &SnapshotFullName) -> TypedCommand<Vec<u8>> {
     let mut c = TypedCommand::new("zfs");
     c.args(["send", "--replicate", "--raw"]);
     // Just send a single snapshot if there's just one snapshot in the range: otherwise send incremental between them.
@@ -40,7 +35,7 @@ pub fn make_zfs_incremental_send_command(
     }
     c
 }
-pub fn make_zfs_recv_command(output_dataset: &DatasetName) -> TypedCommand<(), false> {
+pub fn make_zfs_recv_command(output_dataset: &DatasetName) -> TypedCommand<()> {
     let mut c = TypedCommand::new("zfs");
     c.args([
         "receive",
@@ -56,10 +51,10 @@ pub fn make_zfs_recv_command(output_dataset: &DatasetName) -> TypedCommand<(), f
     c
 }
 
-pub fn make_run_via_ssh_command<T: serde::de::DeserializeOwned, const RO: bool>(
+pub fn make_run_via_ssh_command<T: serde::de::DeserializeOwned>(
     target: &str,
-    nested_command: TypedCommand<T, RO>,
-) -> TypedCommand<T, RO> {
+    nested_command: TypedCommand<T>,
+) -> TypedCommand<T> {
     let mut c = TypedCommand::new("ssh");
     c.arg(target);
     if let Some(known_hosts_file) = &ARGS.known_hosts_file {
