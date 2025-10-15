@@ -43,12 +43,28 @@ impl From<ZfsListSnapshotOutput> for OrganisedSnapshots {
 /// Return the most recent snapshot in `from` that's also present in `against`, if one exists.
 /// This does an n^2 comparison to avoid relying on snapshot name ordering, only exact matches
 /// between snapshot names.
-pub fn youngest_common_ancestor<'a>(
-    from: &'a BTreeSet<OrganisedSnapshot>,
+pub fn youngest_common_ancestor<'f, 'a>(
+    from: &'f BTreeSet<OrganisedSnapshot>,
     against: &'a BTreeSet<OrganisedSnapshot>,
-) -> Option<&'a OrganisedSnapshot> {
-    against
-        .iter()
-        .rev()
-        .find(|&a| from.iter().rev().any(|f| a.snapshot_name == f.snapshot_name))
+) -> Option<(&'f OrganisedSnapshot, &'a OrganisedSnapshot)> {
+    for a in against.iter().rev() {
+        for f in from.iter().rev() {
+            if f.snapshot_name == a.snapshot_name {
+                return Some((f, a));
+            }
+        }
+    }
+    None
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn youngest_common_ancestor() {
+        // TODO: unit tests.
+        assert_eq!(4, 4);
+    }
 }

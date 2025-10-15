@@ -1,6 +1,9 @@
+use anyhow::Context;
+use serde::de::DeserializeOwned;
 use std::{marker::PhantomData, process::Command};
 
-use crate::args;
+use crate::args::ARGS;
+use crate::{log, log_if_verbose};
 
 pub trait TypedCommandExt<T> {
     fn run(&mut self) -> anyhow::Result<T>;
@@ -11,7 +14,7 @@ pub struct TypedCommand<T, const READONLY: bool> {
     command: Command,
     t: PhantomData<T>,
 }
-impl<T: serde::de::DeserializeOwned, const READONLY: bool> TypedCommand<T, READONLY> {
+impl<T: DeserializeOwned, const READONLY: bool> TypedCommand<T, READONLY> {
     pub fn new<S: AsRef<std::ffi::OsStr>>(program: S) -> Self {
         Self {
             command: std::process::Command::new(program),
@@ -38,9 +41,7 @@ impl<T: serde::de::DeserializeOwned, const READONLY: bool> TypedCommand<T, READO
     }
 
     fn _run(&mut self) -> anyhow::Result<T> {
-        if args::ARGS.verbose {
-            println!("RUN: `{:?}`", self.command)
-        }
+        log_if_verbose!("RUN: `{:?}`", self.command);
 
         let output = self.command.output()?;
         if !output.status.success() {
@@ -55,7 +56,21 @@ impl<T: serde::de::DeserializeOwned, const READONLY: bool> TypedCommand<T, READO
     }
 }
 
-impl<T: serde::de::DeserializeOwned> TypedCommandExt<T> for TypedCommand<T, true> {
+impl<S> TypedCommand<S, true> {
+    pub fn pipe_into(&mut self, receiver: &mut TypedCommand<(), false>) -> anyhow::Result<()> {
+        log_if_verbose!("RUN: `{:?} | {:?}`", self.command, receiver.command);
+
+        let mut s = self.command.stdout(std::process::Stdio::piped()).spawn()?;
+        let s_stdout = s.stdout.take().context("failed to get child process stdout")?;
+        receiver.command.stdin(std::process::Stdio::from(s_stdout));
+        receiver.run()?;
+        // Make sure the sender process has terminated once the receiver finishes.
+        s.kill()?;
+        Ok(())
+    }
+}
+
+impl<T: DeserializeOwned> TypedCommandExt<T> for TypedCommand<T, true> {
     fn run(&mut self) -> anyhow::Result<T> {
         self._run()
     }
@@ -64,8 +79,8 @@ impl<T: serde::de::DeserializeOwned> TypedCommandExt<T> for TypedCommand<T, true
 // valid output we could return.
 impl TypedCommandExt<()> for TypedCommand<(), false> {
     fn run(&mut self) -> anyhow::Result<()> {
-        if args::ARGS.dry_run {
-            println!("DRY RUN: would run `{:?}`", self.command);
+        if ARGS.dry_run {
+            log!("DRY RUN: would run `{:?}`", self.command);
             Ok(())
         } else {
             self._run()
