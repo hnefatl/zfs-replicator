@@ -1,5 +1,6 @@
 use anyhow::Context;
 use serde::de::DeserializeOwned;
+use shell_quote::QuoteInto;
 use std::{marker::PhantomData, process::Command};
 
 use crate::args::ARGS;
@@ -41,13 +42,13 @@ impl<T: DeserializeOwned, const READONLY: bool> TypedCommand<T, READONLY> {
     }
 
     fn _run(&mut self) -> anyhow::Result<T> {
-        log_if_verbose!("RUN: `{:?}`", self.command);
+        log_if_verbose!("RUN: `{}`", self);
 
         let output = self.command.output()?;
         if !output.status.success() {
             anyhow::bail!(
-                "running command failed: `{:?}`: {:?}\n{}",
-                self.command,
+                "running command failed: `{}`: {:?}\n{}",
+                self,
                 output.status.code(),
                 String::from_utf8_lossy(&output.stderr),
             );
@@ -58,7 +59,7 @@ impl<T: DeserializeOwned, const READONLY: bool> TypedCommand<T, READONLY> {
 
 impl<S> TypedCommand<S, true> {
     pub fn pipe_into(&mut self, receiver: &mut TypedCommand<(), false>) -> anyhow::Result<()> {
-        log_if_verbose!("RUN: `{:?} | {:?}`", self.command, receiver.command);
+        log_if_verbose!("RUN: `{} | {}`", self, receiver);
 
         let mut s = self.command.stdout(std::process::Stdio::piped()).spawn()?;
         let s_stdout = s.stdout.take().context("failed to get child process stdout")?;
@@ -80,10 +81,22 @@ impl<T: DeserializeOwned> TypedCommandExt<T> for TypedCommand<T, true> {
 impl TypedCommandExt<()> for TypedCommand<(), false> {
     fn run(&mut self) -> anyhow::Result<()> {
         if ARGS.dry_run {
-            log!("DRY RUN: would run `{:?}`", self.command);
+            log!("DRY RUN: would run `{}`", self);
             Ok(())
         } else {
             self._run()
         }
+    }
+}
+
+impl<T, const READONLY: bool> std::fmt::Display for TypedCommand<T, READONLY> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = std::ffi::OsString::new();
+        s.push(self.command.get_program());
+        for arg in self.command.get_args() {
+            s.push(" ");
+            shell_quote::Sh::quote_into(arg, &mut s);
+        }
+        f.write_str(&String::from_utf8_lossy(s.as_encoded_bytes()))
     }
 }
