@@ -1,10 +1,27 @@
-use anyhow::Context;
+use anyhow::{Context, Ok};
 use serde::de::DeserializeOwned;
 use shell_quote::QuoteInto;
 use std::{marker::PhantomData, process::Command};
 
 use crate::args::ARGS;
 use crate::{log, log_if_verbose};
+
+pub trait Runnable<T> {
+    fn run(&mut self) -> anyhow::Result<T>;
+}
+pub trait DryRunnable {
+    fn run_or_dry_run(&mut self) -> anyhow::Result<()>;
+}
+impl<T: Runnable<()> + std::fmt::Display> DryRunnable for T {
+    fn run_or_dry_run(&mut self) -> anyhow::Result<()> {
+        if ARGS.dry_run {
+            log!("DRY RUN: {}", self);
+            Ok(())
+        } else {
+            self.run()
+        }
+    }
+}
 
 /// A `std::process::Command` along with a type hint about what data should be output.
 pub struct TypedCommand<T> {
@@ -36,8 +53,9 @@ impl<T: DeserializeOwned> TypedCommand<T> {
     pub fn get_args(&self) -> std::process::CommandArgs<'_> {
         self.command.get_args()
     }
-
-    pub fn run(&mut self) -> anyhow::Result<T> {
+}
+impl<T: DeserializeOwned> Runnable<T> for TypedCommand<T> {
+    fn run(&mut self) -> anyhow::Result<T> {
         log_if_verbose!("RUN: `{}`", self);
 
         let output = self.command.output()?;
@@ -72,7 +90,9 @@ impl<Tf, Tt: DeserializeOwned> PipedCommand<Tf, Tt> {
     pub fn new(from: TypedCommand<Tf>, to: TypedCommand<Tt>) -> Self {
         PipedCommand { from, to }
     }
-    pub fn run(&mut self) -> anyhow::Result<Tt> {
+}
+impl<Tf, Tt: DeserializeOwned> Runnable<Tt> for PipedCommand<Tf, Tt> {
+    fn run(&mut self) -> anyhow::Result<Tt> {
         log_if_verbose!("PIPE START: `{} | ...`", self.from);
 
         let mut s = self.from.command.stdout(std::process::Stdio::piped()).spawn()?;

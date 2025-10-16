@@ -97,12 +97,7 @@ fn sync_snapshots(
         make_zfs_incremental_send_command(&from.full_name, &to.full_name),
         make_run_via_ssh_command(&ARGS.remote, make_zfs_recv_command(remote_dataset)),
     );
-    if !ARGS.dry_run {
-        command.run()
-    } else {
-        log!("DRY RUN: {}", command);
-        Ok(())
-    }
+    command.run_or_dry_run()
 }
 
 fn main() -> anyhow::Result<()> {
@@ -146,11 +141,7 @@ fn main() -> anyhow::Result<()> {
         } else {
             // Dataset doesn't exist on remote - make it and return an empty snapshot list.
             let mut create_command = make_zfs_create_dataset_command(&remote_dataset);
-            if !ARGS.dry_run {
-                create_command.run()?;
-            } else {
-                log!("DRY RUN: {}", create_command);
-            }
+            create_command.run_or_dry_run()?;
             BTreeSet::new()
         };
 
