@@ -1,4 +1,4 @@
-use anyhow::{Context, Ok};
+use anyhow::Context;
 use serde::de::DeserializeOwned;
 use shell_quote::QuoteInto;
 use std::{marker::PhantomData, process::Command};
@@ -7,9 +7,11 @@ use crate::args::ARGS;
 use crate::{log, log_if_verbose};
 
 pub trait Runnable<T> {
+    /// Run the command and deserialise the output.
     fn run(&mut self) -> anyhow::Result<T>;
 }
 pub trait DryRunnable {
+    // Dry-run the command if the dry-run flag has been set, otherwise run it.
     fn run_or_dry_run(&mut self) -> anyhow::Result<()>;
 }
 impl<T: Runnable<()> + std::fmt::Display> DryRunnable for T {
@@ -61,9 +63,9 @@ impl<T: DeserializeOwned> Runnable<T> for TypedCommand<T> {
         let output = self.command.output()?;
         if !output.status.success() {
             anyhow::bail!(
-                "running command failed: `{}`: {:?}\nstdout:\n{}\nstderr:\n{}",
-                self,
+                "running command failed with {:?}: `{}`\nStdout:\n{}\nStderr:\n{}",
                 output.status.code(),
+                self,
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr),
             );

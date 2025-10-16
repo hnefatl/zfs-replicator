@@ -118,7 +118,8 @@ fn main() -> anyhow::Result<()> {
             &ARGS.remote_dataset
         );
         // We've been told to replicate to a dataset that doesn't exist: create it.
-        make_run_via_ssh_command(&ARGS.remote, make_zfs_create_dataset_command(&ARGS.remote_dataset)).run()?;
+        make_run_via_ssh_command(&ARGS.remote, make_zfs_create_dataset_command(&ARGS.remote_dataset))
+            .run_or_dry_run()?;
     }
 
     let remote: OrganisedSnapshots = make_run_via_ssh_command(
@@ -140,7 +141,8 @@ fn main() -> anyhow::Result<()> {
             snaps.clone()
         } else {
             // Dataset doesn't exist on remote - make it and return an empty snapshot list.
-            let mut create_command = make_zfs_create_dataset_command(&remote_dataset);
+            let mut create_command =
+                make_run_via_ssh_command(&ARGS.remote, make_zfs_create_dataset_command(&remote_dataset));
             create_command.run_or_dry_run()?;
             BTreeSet::new()
         };

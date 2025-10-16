@@ -21,7 +21,7 @@ pub fn make_zfs_list_datasets_command() -> TypedCommand<ZfsListDatasetOutput> {
 }
 pub fn make_zfs_create_dataset_command(dataset: &DatasetName) -> TypedCommand<()> {
     let mut c = TypedCommand::new("zfs");
-    c.args(["create", dataset]);
+    c.args(["create", "-u", "-o", "readonly=on", dataset]);
     c
 }
 pub fn make_zfs_incremental_send_command(from: &SnapshotFullName, to: &SnapshotFullName) -> TypedCommand<Vec<u8>> {
