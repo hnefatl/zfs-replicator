@@ -45,7 +45,7 @@ pub fn make_zfs_recv_command(output_dataset: &DatasetName) -> TypedCommand<()> {
         "compress=off",
         "-o",
         "readonly=on",
-        "-s",
+        "-v",
         output_dataset,
     ]);
     c

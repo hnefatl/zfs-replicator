@@ -61,9 +61,10 @@ impl<T: DeserializeOwned> Runnable<T> for TypedCommand<T> {
         let output = self.command.output()?;
         if !output.status.success() {
             anyhow::bail!(
-                "running command failed: `{}`: {:?}\n{}",
+                "running command failed: `{}`: {:?}\nstdout:\n{}\nstderr:\n{}",
                 self,
                 output.status.code(),
+                String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr),
             );
         }
