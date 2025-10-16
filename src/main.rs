@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 
 mod args;
 use args::*;
@@ -19,6 +19,16 @@ fn get_first_and_last<T: std::cmp::Ord>(set: &BTreeSet<T>) -> Option<(&T, &T)> {
     Some((set.first()?, set.last()?))
 }
 
+/// How to sync a dataset to the remote.
+pub enum DatasetAction<'a> {
+    None,
+    FullSend(&'a OrganisedSnapshot),
+    IncrementalSend {
+        from: &'a OrganisedSnapshot,
+        to: &'a OrganisedSnapshot,
+    },
+}
+
 /// Select a (from, to) local snapshot pair to sync to the remote that results in
 /// the most recent snapshot on the local machine being transferred to the remote,
 /// with an optimally small incremental stream.
@@ -33,12 +43,12 @@ fn snapshots_to_sync<'a>(
     local_snapshots: &'a BTreeSet<OrganisedSnapshot>,
     remote_dataset: &DatasetName,
     remote_snapshots: &BTreeSet<OrganisedSnapshot>,
-) -> anyhow::Result<Option<(&'a OrganisedSnapshot, &'a OrganisedSnapshot)>> {
+) -> anyhow::Result<DatasetAction<'a>> {
     // Handle the empty local/remote snapshot cases.
-    let Some((oldest_local, youngest_local)) = get_first_and_last(local_snapshots) else {
+    let Some((_, youngest_local)) = get_first_and_last(local_snapshots) else {
         // If there's no local snapshots, we don't need to copy anything.
         log_if_verbose!("SKIP: dataset {} has no local snapshots", local_dataset);
-        return Ok(None);
+        return Ok(DatasetAction::None);
     };
     if remote_snapshots.is_empty() {
         // No snapshots on the remote, send our entire history.
@@ -46,7 +56,7 @@ fn snapshots_to_sync<'a>(
             "SYNC ALL: remote dataset {} has no snapshots, send everything",
             remote_dataset
         );
-        return Ok(Some((oldest_local, youngest_local)));
+        return Ok(DatasetAction::FullSend(youngest_local));
     };
 
     let Some((youngest_common_local, youngest_common_remote)) =
@@ -66,14 +76,17 @@ fn snapshots_to_sync<'a>(
             youngest_local.full_name,
             youngest_common_remote.full_name,
         );
-        Ok(None)
+        Ok(DatasetAction::None)
     } else {
         log_if_verbose!(
             "DELTA: should send from `{}` to `{}`",
             youngest_common_local.full_name,
             youngest_local.full_name,
         );
-        Ok(Some((youngest_common_local, youngest_local)))
+        Ok(DatasetAction::IncrementalSend {
+            from: youngest_common_local,
+            to: youngest_local,
+        })
     }
 }
 
@@ -83,21 +96,27 @@ fn sync_snapshots(
     remote_dataset: &DatasetName,
     remote_snapshots: &BTreeSet<OrganisedSnapshot>,
 ) -> anyhow::Result<()> {
-    let Some((from, to)) = snapshots_to_sync(local_dataset, local_snapshots, remote_dataset, remote_snapshots)? else {
-        return Ok(());
+    let send_command = match snapshots_to_sync(local_dataset, local_snapshots, remote_dataset, remote_snapshots)? {
+        DatasetAction::None => return Ok(()),
+        DatasetAction::FullSend(snapshot) => {
+            log!("SEND: sending {} to {}", snapshot.full_name, remote_dataset);
+            make_zfs_full_send_command(&snapshot.full_name)
+        }
+        DatasetAction::IncrementalSend { from, to } => {
+            log!(
+                "SEND: sending [{}, {}] to {}",
+                &from.full_name,
+                &to.full_name,
+                remote_dataset
+            );
+            make_zfs_incremental_send_command(&from.full_name, &to.full_name)
+        }
     };
-    log!(
-        "SEND: sending [{}, {}] to {}",
-        from.full_name,
-        to.full_name,
-        remote_dataset
-    );
-
-    let mut command = PipedCommand::new(
-        make_zfs_incremental_send_command(&from.full_name, &to.full_name),
+    PipedCommand::new(
+        send_command,
         make_run_via_ssh_command(&ARGS.remote, make_zfs_recv_command(remote_dataset)),
-    );
-    command.run_or_dry_run()
+    )
+    .run_or_dry_run()
 }
 
 fn main() -> anyhow::Result<()> {
@@ -115,32 +134,19 @@ fn main() -> anyhow::Result<()> {
         .context("failed to list remote ZFS entities ")?
         .output
         .into();
-    if !remote_entities.datasets.contains_key(&ARGS.remote_dataset) {
-        log!(
-            "CREATE: Remote dataset `{}` doesn't exist on remote, creating it.",
-            &ARGS.remote_dataset
-        );
-        // We've been told to replicate to a dataset that doesn't exist: create it.
-        make_run_via_ssh_command(&ARGS.remote, make_zfs_create_dataset_command(&ARGS.remote_dataset))
-            .run_or_dry_run()?;
-    }
 
     for (local_dataset, local_snapshots) in local_entities.datasets {
         let Some(suffix) = local_dataset.strip_prefix(&ARGS.source_dataset) else {
             // This dataset isn't under the tree we've been told to look at.
             continue;
         };
-
         let remote_dataset = format!("{}{}", &ARGS.remote_dataset, suffix);
-        let remote_snapshots = if let Some(snaps) = remote_entities.datasets.get(&remote_dataset) {
-            snaps.clone()
-        } else {
-            // Dataset doesn't exist on remote - make it and return an empty snapshot list.
-            let mut create_command =
-                make_run_via_ssh_command(&ARGS.remote, make_zfs_create_dataset_command(&remote_dataset));
-            create_command.run_or_dry_run()?;
-            BTreeSet::new()
-        };
+
+        let remote_snapshots = remote_entities
+            .datasets
+            .get(&remote_dataset)
+            .cloned()
+            .unwrap_or_default();
 
         sync_snapshots(&local_dataset, &local_snapshots, &remote_dataset, &remote_snapshots)?;
     }
