@@ -104,15 +104,18 @@ fn main() -> anyhow::Result<()> {
     // Make sure command line args are parsed first.
     std::sync::LazyLock::force(&ARGS);
 
-    let local: OrganisedSnapshots = make_zfs_list_snapshots_command(Some(&ARGS.source_dataset))
+    let local_entities: OrganisedSnapshots = make_zfs_list_command(Some(&ARGS.source_dataset))
         .run()
-        .context("failed to fetch snapshots from local")?
+        .context("failed to list local ZFS entities")?
+        .output
         .into();
 
-    let all_datasets = make_run_via_ssh_command(&ARGS.remote, make_zfs_list_datasets_command())
+    let remote_entities: OrganisedSnapshots = make_run_via_ssh_command(&ARGS.remote, make_zfs_list_command(None))
         .run()
-        .context("failed to fetch all datasets ")?;
-    if !all_datasets.datasets.contains_key(&ARGS.remote_dataset) {
+        .context("failed to list remote ZFS entities ")?
+        .output
+        .into();
+    if !remote_entities.datasets.contains_key(&ARGS.remote_dataset) {
         log!(
             "CREATE: Remote dataset `{}` doesn't exist on remote, creating it.",
             &ARGS.remote_dataset
@@ -122,22 +125,14 @@ fn main() -> anyhow::Result<()> {
             .run_or_dry_run()?;
     }
 
-    let remote: OrganisedSnapshots = make_run_via_ssh_command(
-        &ARGS.remote,
-        make_zfs_list_snapshots_command(Some(&ARGS.remote_dataset)),
-    )
-    .run()
-    .context("failed to fetch snapshots from remote")?
-    .into();
-
-    for (local_dataset, local_snapshots) in local.datasets {
+    for (local_dataset, local_snapshots) in local_entities.datasets {
         let Some(suffix) = local_dataset.strip_prefix(&ARGS.source_dataset) else {
             // This dataset isn't under the tree we've been told to look at.
             continue;
         };
 
         let remote_dataset = format!("{}{}", &ARGS.remote_dataset, suffix);
-        let remote_snapshots = if let Some(snaps) = remote.datasets.get(&remote_dataset) {
+        let remote_snapshots = if let Some(snaps) = remote_entities.datasets.get(&remote_dataset) {
             snaps.clone()
         } else {
             // Dataset doesn't exist on remote - make it and return an empty snapshot list.

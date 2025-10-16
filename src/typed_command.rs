@@ -6,31 +6,78 @@ use std::{marker::PhantomData, process::Command};
 use crate::args::ARGS;
 use crate::{log, log_if_verbose};
 
-pub trait Runnable<T> {
+pub trait OutputType: Sized {
+    fn parse(output: Vec<u8>) -> anyhow::Result<Self>;
+}
+
+pub struct IgnoreOutput;
+impl OutputType for IgnoreOutput {
+    fn parse(_: Vec<u8>) -> anyhow::Result<Self> {
+        Ok(Self)
+    }
+}
+
+#[allow(dead_code)]
+pub struct RawOutput {
+    pub output: Vec<u8>,
+}
+impl OutputType for RawOutput {
+    fn parse(output: Vec<u8>) -> anyhow::Result<Self> {
+        Ok(Self { output })
+    }
+}
+
+#[allow(dead_code)]
+pub struct StringOutput {
+    pub output: String,
+}
+impl OutputType for StringOutput {
+    fn parse(output: Vec<u8>) -> anyhow::Result<Self> {
+        Ok(Self {
+            output: String::from_utf8(output)?,
+        })
+    }
+}
+
+pub struct ParseableOutput<T> {
+    pub output: T,
+}
+impl<T: DeserializeOwned> OutputType for ParseableOutput<T> {
+    fn parse(output: Vec<u8>) -> anyhow::Result<Self> {
+        Ok(Self {
+            output: serde_json::from_slice::<T>(&output)?,
+        })
+    }
+}
+
+pub trait Runnable<Output: OutputType> {
     /// Run the command and deserialise the output.
-    fn run(&mut self) -> anyhow::Result<T>;
+    fn run(&mut self) -> anyhow::Result<Output>;
 }
 pub trait DryRunnable {
     // Dry-run the command if the dry-run flag has been set, otherwise run it.
     fn run_or_dry_run(&mut self) -> anyhow::Result<()>;
 }
-impl<T: Runnable<()> + std::fmt::Display> DryRunnable for T {
+/// Only commands without output can be "generalisably" dry-runnable, because () is the only type we
+/// know we can construct. Other commands needing to be dry-runned should be explicitly dry-run with
+/// a conditional at the callsite.
+impl<T: Runnable<IgnoreOutput> + std::fmt::Display> DryRunnable for T {
     fn run_or_dry_run(&mut self) -> anyhow::Result<()> {
         if ARGS.dry_run {
             log!("DRY RUN: {}", self);
-            Ok(())
         } else {
-            self.run()
+            self.run()?;
         }
+        Ok(())
     }
 }
 
 /// A `std::process::Command` along with a type hint about what data should be output.
-pub struct TypedCommand<T> {
+pub struct TypedCommand<Output> {
     command: Command,
-    t: PhantomData<T>,
+    t: PhantomData<Output>,
 }
-impl<T: DeserializeOwned> TypedCommand<T> {
+impl<Output: OutputType> TypedCommand<Output> {
     pub fn new<S: AsRef<std::ffi::OsStr>>(program: S) -> Self {
         Self {
             command: std::process::Command::new(program),
@@ -56,8 +103,8 @@ impl<T: DeserializeOwned> TypedCommand<T> {
         self.command.get_args()
     }
 }
-impl<T: DeserializeOwned> Runnable<T> for TypedCommand<T> {
-    fn run(&mut self) -> anyhow::Result<T> {
+impl<Output: OutputType> Runnable<Output> for TypedCommand<Output> {
+    fn run(&mut self) -> anyhow::Result<Output> {
         log_if_verbose!("RUN: `{}`", self);
 
         let output = self.command.output()?;
@@ -70,10 +117,10 @@ impl<T: DeserializeOwned> Runnable<T> for TypedCommand<T> {
                 String::from_utf8_lossy(&output.stderr),
             );
         }
-        Ok(serde_json::from_slice::<T>(&output.stdout)?)
+        Output::parse(output.stdout)
     }
 }
-impl<T> std::fmt::Display for TypedCommand<T> {
+impl<Output> std::fmt::Display for TypedCommand<Output> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = std::ffi::OsString::new();
         s.push(self.command.get_program());
@@ -85,17 +132,17 @@ impl<T> std::fmt::Display for TypedCommand<T> {
     }
 }
 
-pub struct PipedCommand<Tf, Tt> {
-    from: TypedCommand<Tf>,
-    to: TypedCommand<Tt>,
+pub struct PipedCommand<Ot> {
+    from: TypedCommand<RawOutput>,
+    to: TypedCommand<Ot>,
 }
-impl<Tf, Tt: DeserializeOwned> PipedCommand<Tf, Tt> {
-    pub fn new(from: TypedCommand<Tf>, to: TypedCommand<Tt>) -> Self {
+impl<Ot> PipedCommand<Ot> {
+    pub fn new(from: TypedCommand<RawOutput>, to: TypedCommand<Ot>) -> Self {
         PipedCommand { from, to }
     }
 }
-impl<Tf, Tt: DeserializeOwned> Runnable<Tt> for PipedCommand<Tf, Tt> {
-    fn run(&mut self) -> anyhow::Result<Tt> {
+impl<Ot: OutputType> Runnable<Ot> for PipedCommand<Ot> {
+    fn run(&mut self) -> anyhow::Result<Ot> {
         log_if_verbose!("PIPE START: `{} | ...`", self.from);
 
         let mut s = self.from.command.stdout(std::process::Stdio::piped()).spawn()?;
@@ -107,7 +154,7 @@ impl<Tf, Tt: DeserializeOwned> Runnable<Tt> for PipedCommand<Tf, Tt> {
         result
     }
 }
-impl<Tf, Tt> std::fmt::Display for PipedCommand<Tf, Tt> {
+impl<Tt> std::fmt::Display for PipedCommand<Tt> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{} | {}", self.from, self.to))
     }

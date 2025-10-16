@@ -4,9 +4,11 @@ use crate::args::ARGS;
 use crate::typed_command::*;
 use crate::zfs_types::*;
 
-pub fn make_zfs_list_snapshots_command(parent_dataset: Option<&DatasetName>) -> TypedCommand<ZfsListSnapshotOutput> {
+pub fn make_zfs_list_command(
+    parent_dataset: Option<&DatasetName>,
+) -> TypedCommand<ParseableOutput<ZfsListOutput>> {
     let mut c = TypedCommand::new("zfs");
-    c.args(["list", "-t", "snapshot", "--json", "--json-int"]);
+    c.args(["list", "-t", "snapshot,filesystem", "--json", "--json-int"]);
 
     if let Some(parent_dataset) = parent_dataset {
         // Recursive from the parent dataset down.
@@ -14,17 +16,12 @@ pub fn make_zfs_list_snapshots_command(parent_dataset: Option<&DatasetName>) -> 
     }
     c
 }
-pub fn make_zfs_list_datasets_command() -> TypedCommand<ZfsListDatasetOutput> {
+pub fn make_zfs_create_dataset_command(dataset: &DatasetName) -> TypedCommand<IgnoreOutput> {
     let mut c = TypedCommand::new("zfs");
-    c.args(["list", "-t", "filesystem", "--json"]);
+    c.args(["create", "-u", "-v", "-o", "readonly=on", dataset]);
     c
 }
-pub fn make_zfs_create_dataset_command(dataset: &DatasetName) -> TypedCommand<()> {
-    let mut c = TypedCommand::new("zfs");
-    c.args(["create", "-u", "-o", "readonly=on", dataset]);
-    c
-}
-pub fn make_zfs_incremental_send_command(from: &SnapshotFullName, to: &SnapshotFullName) -> TypedCommand<Vec<u8>> {
+pub fn make_zfs_incremental_send_command(from: &SnapshotFullName, to: &SnapshotFullName) -> TypedCommand<RawOutput> {
     let mut c = TypedCommand::new("zfs");
     c.args(["send", "--replicate", "--raw"]);
     // Just send a single snapshot if there's just one snapshot in the range: otherwise send incremental between them.
@@ -35,7 +32,7 @@ pub fn make_zfs_incremental_send_command(from: &SnapshotFullName, to: &SnapshotF
     }
     c
 }
-pub fn make_zfs_recv_command(output_dataset: &DatasetName) -> TypedCommand<()> {
+pub fn make_zfs_recv_command(output_dataset: &DatasetName) -> TypedCommand<IgnoreOutput> {
     let mut c = TypedCommand::new("zfs");
     c.args([
         "receive",
@@ -51,10 +48,10 @@ pub fn make_zfs_recv_command(output_dataset: &DatasetName) -> TypedCommand<()> {
     c
 }
 
-pub fn make_run_via_ssh_command<T: serde::de::DeserializeOwned>(
+pub fn make_run_via_ssh_command<Output: OutputType>(
     target: &str,
-    nested_command: TypedCommand<T>,
-) -> TypedCommand<T> {
+    nested_command: TypedCommand<Output>,
+) -> TypedCommand<Output> {
     let mut c = TypedCommand::new("ssh");
     c.arg(target);
     if let Some(known_hosts_file) = &ARGS.known_hosts_file {

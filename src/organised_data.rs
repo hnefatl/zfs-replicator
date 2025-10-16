@@ -23,18 +23,18 @@ impl Ord for OrganisedSnapshot {
 pub struct OrganisedSnapshots {
     pub datasets: BTreeMap<DatasetName, BTreeSet<OrganisedSnapshot>>,
 }
-impl From<ZfsListSnapshotOutput> for OrganisedSnapshots {
-    fn from(value: ZfsListSnapshotOutput) -> Self {
+impl From<ZfsListOutput> for OrganisedSnapshots {
+    fn from(value: ZfsListOutput) -> Self {
         let mut datasets = BTreeMap::<DatasetName, BTreeSet<OrganisedSnapshot>>::new();
-        for snapshot in value.datasets.values() {
-            datasets
-                .entry(snapshot.dataset.clone())
-                .or_default()
-                .insert(OrganisedSnapshot {
+        for item in value.output.values() {
+            let dataset = datasets.entry(item.dataset_name().clone()).or_default();
+            if let ZfsListItem::Snapshot(snapshot) = item {
+                dataset.insert(OrganisedSnapshot {
                     snapshot_name: snapshot.snapshot_name.clone(),
                     full_name: snapshot.name.clone(),
                     createtxg: snapshot.createtxg,
                 });
+            };
         }
         OrganisedSnapshots { datasets }
     }
@@ -56,7 +56,6 @@ pub fn youngest_common_ancestor<'f, 'a>(
     }
     None
 }
-
 
 #[cfg(test)]
 mod tests {
